@@ -154,19 +154,19 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     twoSecFrames = floor(2 * par.sim.fs * numFrames / length(all_noisy_mic_sigs));
     twoSecNoise_mat = X_mat(:, 1:twoSecFrames, :);
     D = 20;
-    X_XH_noiseOnly = 0;
-    X_XH = 0;
-    beta = 350;
+    X_XH_sum_noiseOnly = 0;
+    X_XH_sum = 0;
+    beta = 315;
     IVAD_threshold = 0.25;
     %% estimate Gamma V = normalized noise CPSD matrix with respect to the reff microphone
     for iBand = 1:numBands
         for iFrame = 1:twoSecFrames
             if iFrame < twoSecFrames
-               X_XH_noiseOnly = X_XH_noiseOnly + squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :))';  
+               X_XH_sum_noiseOnly = X_XH_sum_noiseOnly + squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :))';  
             end
         end 
     end
-    Cv_hat =  X_XH_noiseOnly / twoSecFrames;
+    Cv_hat =  X_XH_sum_noiseOnly / twoSecFrames;
     gamma_V = Cv_hat( :, :) / Cv_hat(ii_ref, ii_ref);
 
     %uncomment to hear the first 2 sec of noise
@@ -186,16 +186,17 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
             %  ... 
             if iFrame > D
                 for l_prime = 1:D
-                    X_XH = X_XH + squeeze(X_mat(iBand, iFrame - D + l_prime, :)) * squeeze(X_mat(iBand, iFrame - D + l_prime, :, :))';
+                    X_XH_sum = X_XH_sum + squeeze(X_mat(iBand, iFrame - D + l_prime, :)) * squeeze(X_mat(iBand, iFrame - D + l_prime, :, :))';
                 end
             end
-            Cx_hat = X_XH / numFrames;
+            X_XH = squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :, :))';
+            Cx_hat = X_XH_sum / numFrames;
             [lambda_s_ml, lambda_v_ml] = ml_known_cova_struct_and_d_fun(Cx_hat, gamma_V, d_kl, ii_ref);
             logLikelihood(iBand, iFrame) = D * log(det(1/M * trace(X_XH * gamma_V') * gamma_V)) - D * log(det(lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V)); %eq 13
             logLikelihood_abs(iBand, iFrame) = abs(logLikelihood(iBand, iFrame));
             
             %log likelihood VAD
-            if logLikelihood_abs(iBand, iFrame) < beta
+            if logLikelihood_abs(iBand, iFrame) > beta
                 VAD(iBand, iFrame) = 0;
             else
                 VAD(iBand, iFrame) = 1;
@@ -215,7 +216,20 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     %% Plot graphs
     spec = spectrogram(x_ref, par.stft.awin, 255, [], par.sim.fs, 'yaxis');
     
-    tiledlayout(2,1)
+    tiledlayout(4,1)
+    
+    nexttile
+    spectrogram(x_ref, par.stft.awin, 255, [], par.sim.fs, 'yaxis');
+    colormap(summer);
+    colorbar( 'off' )
+    title('X ref');
+    
+    nexttile
+    imagesc(logLikelihood_abs);
+    colormap(summer);
+    set(gca, 'YDir', 'normal');
+    title('Log likelihood magnitude');
+    
     nexttile
     imagesc(VAD);
     colormap(summer);
