@@ -21,9 +21,9 @@ par.config.i_mics_left = [1 2];%mics used for left-ear beamformer (leave empty t
 par.config.i_ref_left = 1;%index of left reference mic. (left-front)
 par.config.i_mics_right = [3 4];%1 2 3 4];%mics used of right-ear beamformer
 par.config.i_ref_right = 3;%index of right reference mic. (right-front)
-par.config.target_dir_deg = 15;%frontal target (0:5:355) CCW
-par.config.look_dir_deg = 0;% (0:5:355) CCW probs not use
-par.config.snr_db_ref_left = 5; % SNR at the reff microphone
+par.config.target_dir_deg = 15;%frontal target (0:5:355)
+par.config.look_dir_deg = 0;% (0:5:355)
+par.config.snr_db_ref_left = 5; %
 par.stft.frame_length  = 256;  %corresponds to 12.8ms at fs=20000
 par.stft.awin = sqrt(mod_hann(par.stft.frame_length));%use sqrt hann. window
 par.stft.swin = sqrt(mod_hann(par.stft.frame_length));%synth.window
@@ -104,7 +104,6 @@ Xo_trg.rearRight.x = g_trg*Xo_trg.rearRight.x;
 [val, i_trg_dir] = find(round(theta/2/pi*360) == par.config.target_dir_deg);
 all_clean_mic_sigs = [Xo_trg.frontLeft.x(:,i_trg_dir) Xo_trg.rearLeft.x(:,i_trg_dir) Xo_trg.frontRight.x(:,i_trg_dir) Xo_trg.rearRight.x(:,i_trg_dir)];
 
-%soundsc([all_clean_mic_sigs(:,1) all_clean_mic_sigs(:,3)],par.sim.fs);
 % test: soundsc([all_clean_mic_sigs(:,1) all_clean_mic_sigs(:,3)],par.sim.fs)
 %       should come from specified direction (par.config.target_dir_deg)
 %       when listening in headphones.
@@ -112,7 +111,6 @@ all_clean_mic_sigs = [Xo_trg.frontLeft.x(:,i_trg_dir) Xo_trg.rearLeft.x(:,i_trg_
 % now create noisy signal
 all_noisy_mic_sigs = all_clean_mic_sigs + all_noise_mic_sigs;
 
-%soundsc(all_noisy_mic_sigs(:,par.config.i_ref_left), par.sim.fs);
 %%
 % Pick out relevant microphone signals and perform beamforming
 % (first left, then right)
@@ -138,24 +136,21 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     noisy_mic_sigs = clean_mic_sigs + noise_mic_sigs;
     
     % perform STFT for all signals
-    S_mat = stft(par.stft, clean_mic_sigs); % clean singal tile matrix
-    S_mat_dB = mag2db(abs(S_mat));
-    V_mat = stft(par.stft, noise_mic_sigs); % noise signal tile matrix
+    S_mat = stft(par.stft,clean_mic_sigs);
+    V_mat = stft(par.stft,noise_mic_sigs);
     X_mat = S_mat + V_mat; %The STFT is linear so we can sum STFTs
-    X_mat_dB = mag2db(abs(X_mat));
     
     [numBands, numFrames, M] = size(S_mat);
-
-    %% Initialize my variables            
+     %% Initialize my variables            
     twoSecFrames = floor(2 * par.sim.fs * numFrames / length(all_noisy_mic_sigs));
     twoSecNoise_mat = X_mat(:, 1:twoSecFrames, :);
     D = 20;
     X_XH_sum_noiseOnly = 0;
     X_XH_sum = 0;
-    beta = 53.5;
+    beta = 50;
     IVAD_threshold = 25;
     
-    %% estimate Gamma V = normalized noise CPSD matrix with respect to the reff microphone
+     %% estimate Gamma V = normalized noise CPSD matrix with respect to the reff microphone
     for iBand = 1:numBands
         for iFrame = 1:twoSecFrames
             if iFrame < twoSecFrames
@@ -165,96 +160,105 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     end
     Cv_hat =  X_XH_sum_noiseOnly / D;
     gamma_V = Cv_hat( :, :) / Cv_hat(ii_ref, ii_ref);
-
-    %uncomment to hear the first 2 sec of noise
-    %twoSecNoise = (all_noisy_mic_sigs(1:2 * par.sim.fs, ii_ref)); 
     
-    %% 
+    %% Processing
     % do beamforming for all freq. bands and all time frames.
     % the implementation below is inefficient - but hopefully easy to read
     for iBand = 1:numBands
         d_kl = d_vecs(:,iBand);%get relative transfer function
         X_l = squeeze(X_mat(iBand,:,:)).';%mic sigs as cols for this freq
-        for iFrame = 1:numFrames
+        for iFrame = D:numFrames
 
             X_kl = X_l(:,iFrame);%Mx1 noisy mic. sig.
             
             %% CODE TO BE FILLED IN BY COURSE PARTICIPANTS
             %  ... 
-            if iFrame > D
+            if iFrame <D
+                 X_W_DSB(iBand, iFrame) = X_kl(ii_ref);
+                 X_W_MVDR(iBand, iFrame) = X_kl(ii_ref);
+                 X_W_MVDR_unknown(iBand, iFrame) = X_kl(ii_ref);
+                 continue;
+            end
+            
+           if iFrame > D
                 for l_prime = 1:D
                     X_XH_sum = X_XH_sum + squeeze(X_mat(iBand, iFrame - D + l_prime, :)) * squeeze(X_mat(iBand, iFrame - D + l_prime, :, :))';
                 end
-            end
-            X_XH = squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :, :))';
+           end
             Cx_hat = X_XH_sum / D;
-            [lambda_s_ml, lambda_v_ml] = ml_known_cova_struct_and_d_fun(Cx_hat, gamma_V, d_kl, ii_ref);
-            logLikelihood(iBand, iFrame) = D * log(det(1/M * trace(X_XH * inv(gamma_V)) * gamma_V)) - D * log(det(lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V)); %eq 13
-            logLikelihood_dB(iBand, iFrame) = mag2db(abs(logLikelihood(iBand, iFrame)));
+            Cx_hat_inv = inv(Cx_hat);
+            [d_ml, lambda_s_ml, lambda_v_ml] = ml_known_covariance_structure_fun(Cx_hat, gamma_V, ii_ref);
             
-            %log likelihood VAD
-            if logLikelihood_dB(iBand, iFrame) > beta
-                VAD(iBand, iFrame) = 0;
-            else
-                VAD(iBand, iFrame) = 1;
-            end
+            %DSB
+            W_DSB(:, iBand,iFrame) = d_kl/(d_kl' * d_kl); %DSB Beamformer
+            X_W_DSB(iBand, iFrame) = X_kl' * W_DSB(:, iBand, iFrame); %beamformer output
             
-            %Ideal VAD
-            if S_mat_dB(iBand, iFrame) < IVAD_threshold
-                IVAD(iBand, iFrame) = 0;
-            else
-                IVAD(iBand, iFrame) = 1;
-            end
+            %MVDR
+            W_MVDR(:, iBand, iFrame) = (Cx_hat_inv * d_kl) / (d_kl' * Cx_hat_inv * d_kl);
+            X_W_MVDR(iBand, iFrame) = X_kl' * W_MVDR(:, iBand, iFrame);
             
-            %VAD overlap
-            if VAD(iBand,iFrame) == IVAD(iBand, iFrame)
-                VAD_overlap(iBand, iFrame) = 0;
-            else
-                VAD_overlap(iBand, iFrame) = 1;
-            end
+            %MVDR with unknown d
+            W_MVDR_unknown(:, iBand, iFrame) = (Cx_hat_inv * d_ml) / (d_ml' * Cx_hat_inv * d_ml);
+            X_W_MVDR_unknown(iBand, iFrame) = X_kl' * W_MVDR_unknown(:, iBand, iFrame);
+            
+            %MWF
+            Cv = lambda_v_ml * gamma_V;
+            Cx = lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V;
+            Cs = Cx - Cv;
+            e = zeros(length(par.config.i_mics_left), 1);
+            e(ii_ref) = 1;
+            W_MWF(:, iBand, iFrame) = inv(Cx)*Cs*e;
+            X_W_MWF(iBand, iFrame) = X_kl' * W_MWF(:, iBand, iFrame);
+            
         end
     end
+    
+    %% Plot Graphs
+    tiledlayout(4,1);
+
+    nexttile;
+    imagesc(mag2db(abs(X_W_DSB)));
+    colormap(summer);
+    set(gca, 'YDir', 'normal'); 
+    title('Result of DSB beamformer');
+    
+    nexttile;
+    imagesc(mag2db(abs(X_W_MVDR)));
+    colormap(summer);
+    set(gca, 'YDir', 'normal'); 
+    title('Result of MVDR beamformer');
+    
+    nexttile;
+    imagesc(mag2db(abs(X_W_MVDR_unknown)));
+    colormap(summer);
+    set(gca, 'YDir', 'normal'); 
+    title('Result of MVDR beamformer with unknown RATF');
+    
+    nexttile;
+    imagesc(mag2db(abs(X_W_MWF)));
+    colormap(summer);
+    set(gca, 'YDir', 'normal'); 
+    title('Result of MWF beamformer');
+    %% Create audio files
+    s_DSB = Normalize(istft(par.stft,  X_W_DSB) ,1);
+    s_MVDR = Normalize(abs(istft(par.stft, X_W_MVDR)) ,1);
+    s_MVDR_u = Normalize(abs(istft(par.stft, X_W_MVDR_unknown)) ,1);
+    s_MWF = Normalize(abs(istft(par.stft, X_W_MWF)) ,1);
+    
+    s_MVDR(isnan(s_MVDR)) = 0;
+    s_MVDR_u(isnan(s_MVDR_u)) = 0;
+    s_MWF(isnan(s_MWF)) = 0;
+    
+    audiowrite("Audio/DSB.wav", s_DSB, par.sim.fs);
+    audiowrite("Audio/MVDR.wav", s_MVDR, par.sim.fs);
+    audiowrite("Audio/MVDR_u.wav", s_MVDR_u, par.sim.fs);
+    audiowrite("Audio/MWF.wav", s_MWF, par.sim.fs);
+  
+    %%
     % keep clean and noisy sigs at ref. mic for objective evaluation
     x_ref = all_noisy_mic_sigs(:,i_mics(ii_ref));
     s_ref = all_clean_mic_sigs(:,i_mics(ii_ref));
-    %% Plot graphs
-    spec = spectrogram(x_ref, par.stft.awin, 255, [], par.sim.fs, 'yaxis');
-    
-    tiledlayout(5,1)
-    
-    nexttile
-    spectrogram(x_ref, par.stft.awin, 255, [], par.sim.fs, 'yaxis');
-    colormap(summer);
-    colorbar( 'off' )
-    title('X ref');
-    
-    nexttile
-    imagesc(logLikelihood_dB);
-    colormap(summer);
-    set(gca, 'YDir', 'normal');
-    title('Log likelihood magnitude');
-    
-    nexttile
-    imagesc(VAD);
-    colormap(summer);
-    set(gca,'YDir','normal');
-    title(sprintf('Log Likelihood VAD with threshold = %d', beta));
-    
-    nexttile
-    imagesc(IVAD);
-    colormap(summer);
-    set(gca, 'YDir', 'normal');
-    title(sprintf('Ideal VAD with threshold = %d', IVAD_threshold));
-    
-    nexttile
-    imagesc(VAD_overlap);
-    colormap(summer);
-    set(gca, 'YDir', 'normal');
-    title('Binary overlapping tiles between the LLVAD and IVAD');
-    txt = 'Colors have been inverted for readability';
-    text(10, 110, txt, 'FontSize', 10);
-    %% 
-    
+      
     % convert STFTs to time domain
     % s_mvdr = istft(par.stft,S_mvdr_stft);
     % s_mwf = istft(par.stft, S_mwf_stft);
@@ -265,8 +269,17 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     %s_mvdr_l = s_mvdr;
     %s_mwf_l = s_mwf;
     
+    %% Perform Analysis
+    ESTOI(1) = estoi(s_ref, s_DSB, par.sim.fs);
+    ESTOI(2) = estoi(s_ref, s_MVDR, par.sim.fs);
+    ESTOI(3) = estoi(s_ref, s_MVDR_u, par.sim.fs);
+    ESTOI(4) = estoi(s_ref, s_MWF, par.sim.fs);
+    
+    SNR(1) = snr(s_ref, s_DSB);
+    SNR(2) = snr(s_ref, s_MVDR);
+    SNR(3) = snr(s_ref, s_MVDR_u);
+    SNR(4) = snr(s_ref, s_MWF);
 end %endif: should we process left ear HA?
-
 
 %
 % Processing
@@ -296,19 +309,15 @@ if ~isempty(par.config.i_mics_right)%should we process right ear HA?
     
     % do beamforming for all freq. bands and all time frames.
     % the implementation below is inefficient - but hopefully easy to read
-    
-    W_DSB = zeros(M, numBands, numFrames);
-    XW_DSB = zeros(M, numFrames);
-    
     for iBand = 1:numBands
         d_kl = d_vecs(:,iBand);%get relative transfer function
         X_l = squeeze(X_mat(iBand,:,:)).';%mic sigs as cols for this freq
         for iFrame = 1:numFrames
-            
             X_kl = X_l(:,iFrame);%Mx1 noisy mic. sig.
             
             %% CODE TO BE FILLED IN BY COURSE PARTICIPANTS
             %  ... 
+
         end
     end
     
