@@ -152,7 +152,7 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     D = 20;
     X_XH_sum_noiseOnly = 0;
     X_XH_sum = 0;
-    beta = 53.5;
+    beta = 45;
     IVAD_threshold = 25;
     
     %% estimate Gamma V = normalized noise CPSD matrix with respect to the reff microphone
@@ -163,7 +163,7 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
             end
         end 
     end
-    Cv_hat =  X_XH_sum_noiseOnly / D;
+    Cv_hat =  X_XH_sum_noiseOnly / twoSecFrames;
     gamma_V = Cv_hat( :, :) / Cv_hat(ii_ref, ii_ref);
 
     %uncomment to hear the first 2 sec of noise
@@ -181,19 +181,23 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
             
             %% CODE TO BE FILLED IN BY COURSE PARTICIPANTS
             %  ... 
-            if iFrame > D
-                for l_prime = 1:D
-                    X_XH_sum = X_XH_sum + squeeze(X_mat(iBand, iFrame - D + l_prime, :)) * squeeze(X_mat(iBand, iFrame - D + l_prime, :, :))';
-                end
-            end
-            X_XH = squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :, :))';
-            Cx_hat = X_XH_sum / D;
+%             if iFrame > D
+%                 for l_prime = 1:D
+%                     X_XH_sum = X_XH_sum + squeeze(X_mat(iBand, iFrame - D + l_prime, :)) * squeeze(X_mat(iBand, iFrame - D + l_prime, :, :))';
+%                 end
+%             end
+%             X_XH = squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :, :))';
+            %Cx_hat = X_XH_sum / D;
+            
+            X = X_l(:, max(iFrame - D + 1, 1):iFrame);
+            Cx_hat = (X * X') / D;
+            
             [lambda_s_ml, lambda_v_ml] = ml_known_cova_struct_and_d_fun(Cx_hat, gamma_V, d_kl, ii_ref);
-            logLikelihood(iBand, iFrame) = D * log(det(1/M * trace(X_XH * inv(gamma_V)) * gamma_V)) - D * log(det(lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V)); %eq 13
+            logLikelihood(iBand, iFrame) = D * log(det(1/M * trace(X * X' * inv(gamma_V)) * gamma_V)) - D * log(det(lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V)); %eq 13
             logLikelihood_dB(iBand, iFrame) = mag2db(abs(logLikelihood(iBand, iFrame)));
             
             %log likelihood VAD
-            if logLikelihood_dB(iBand, iFrame) > beta
+            if logLikelihood_dB(iBand, iFrame) < beta
                 VAD(iBand, iFrame) = 0;
             else
                 VAD(iBand, iFrame) = 1;
@@ -252,7 +256,7 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     set(gca, 'YDir', 'normal');
     title('Binary overlapping tiles between the LLVAD and IVAD');
     txt = 'Colors have been inverted for readability';
-    text(10, 110, txt, 'FontSize', 10);
+    text(10, 30, txt, 'FontSize', 10);
     %% 
     
     % convert STFTs to time domain

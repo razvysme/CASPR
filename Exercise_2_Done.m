@@ -158,7 +158,7 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
             end
         end 
     end
-    Cv_hat =  X_XH_sum_noiseOnly / D;
+    Cv_hat =  X_XH_sum_noiseOnly / twoSecFrames;
     gamma_V = Cv_hat( :, :) / Cv_hat(ii_ref, ii_ref);
     
     %% Processing
@@ -173,42 +173,39 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
             
             %% CODE TO BE FILLED IN BY COURSE PARTICIPANTS
             %  ... 
-            if iFrame <D
+            X = X_l(:, max(iFrame - D + 1, 1):iFrame);
+            Cx_hat = (X * X') / D;
+            Cx_hat_inv = inv(Cx_hat);
+            [d_ml, lambda_s_ml, lambda_v_ml] = ml_known_covariance_structure_fun(Cx_hat, gamma_V, ii_ref);
+            Cv = lambda_v_ml * gamma_V;
+            
+            if iFrame > D
+                %DSB
+                W_DSB(:, iBand,iFrame) = d_kl/(d_kl' * d_kl); %DSB Beamformer
+                X_W_DSB(iBand, iFrame) = X_kl' * W_DSB(:, iBand, iFrame); %beamformer output
+
+                %MVDR
+                %W_MVDR(:, iBand, iFrame) = (Cx_hat_inv * d_kl) / (d_kl' * Cx_hat_inv * d_kl); %version one
+                W_MVDR(:, iBand, iFrame) = (inv(Cv) * d_kl)/(d_kl' * inv(Cv) * d_kl); %version 2
+                X_W_MVDR(iBand, iFrame) = X_kl' * W_MVDR(:, iBand, iFrame);
+
+                %MVDR with unknown d
+                W_MVDR_unknown(:, iBand, iFrame) = (Cx_hat_inv * d_ml) / (d_ml' * Cx_hat_inv * d_ml);
+                X_W_MVDR_unknown(iBand, iFrame) = X_kl' * W_MVDR_unknown(:, iBand, iFrame);
+
+                %MWF
+                Cx = lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V;
+                Cs = Cx - Cv;
+                e = zeros(length(par.config.i_mics_left), 1);
+                e(ii_ref) = 1;
+                W_MWF(:, iBand, iFrame) = inv(Cx)*Cs*e;
+                X_W_MWF(iBand, iFrame) = X_kl' * W_MWF(:, iBand, iFrame);
+            else
                  X_W_DSB(iBand, iFrame) = X_kl(ii_ref);
                  X_W_MVDR(iBand, iFrame) = X_kl(ii_ref);
                  X_W_MVDR_unknown(iBand, iFrame) = X_kl(ii_ref);
-                 continue;
+                 X_W_MWF(iBand, iFrame) = X_kl(ii_ref);
             end
-            
-           if iFrame > D
-                for l_prime = 1:D
-                    X_XH_sum = X_XH_sum + squeeze(X_mat(iBand, iFrame - D + l_prime, :)) * squeeze(X_mat(iBand, iFrame - D + l_prime, :, :))';
-                end
-           end
-            Cx_hat = X_XH_sum / D;
-            Cx_hat_inv = inv(Cx_hat);
-            [d_ml, lambda_s_ml, lambda_v_ml] = ml_known_covariance_structure_fun(Cx_hat, gamma_V, ii_ref);
-            
-            %DSB
-            W_DSB(:, iBand,iFrame) = d_kl/(d_kl' * d_kl); %DSB Beamformer
-            X_W_DSB(iBand, iFrame) = X_kl' * W_DSB(:, iBand, iFrame); %beamformer output
-            
-            %MVDR
-            W_MVDR(:, iBand, iFrame) = (Cx_hat_inv * d_kl) / (d_kl' * Cx_hat_inv * d_kl);
-            X_W_MVDR(iBand, iFrame) = X_kl' * W_MVDR(:, iBand, iFrame);
-            
-            %MVDR with unknown d
-            W_MVDR_unknown(:, iBand, iFrame) = (Cx_hat_inv * d_ml) / (d_ml' * Cx_hat_inv * d_ml);
-            X_W_MVDR_unknown(iBand, iFrame) = X_kl' * W_MVDR_unknown(:, iBand, iFrame);
-            
-            %MWF
-            Cv = lambda_v_ml * gamma_V;
-            Cx = lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V;
-            Cs = Cx - Cv;
-            e = zeros(length(par.config.i_mics_left), 1);
-            e(ii_ref) = 1;
-            W_MWF(:, iBand, iFrame) = inv(Cx)*Cs*e;
-            X_W_MWF(iBand, iFrame) = X_kl' * W_MWF(:, iBand, iFrame);
             
         end
     end
