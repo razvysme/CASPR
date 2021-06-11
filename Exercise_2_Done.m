@@ -23,7 +23,7 @@ par.config.i_mics_right = [3 4];%1 2 3 4];%mics used of right-ear beamformer
 par.config.i_ref_right = 3;%index of right reference mic. (right-front)
 par.config.target_dir_deg = 15;%frontal target (0:5:355)
 par.config.look_dir_deg = 0;% (0:5:355)
-par.config.snr_db_ref_left = 5; %
+par.config.snr_db_ref_left = -20; %
 par.stft.frame_length  = 256;  %corresponds to 12.8ms at fs=20000
 par.stft.awin = sqrt(mod_hann(par.stft.frame_length));%use sqrt hann. window
 par.stft.swin = sqrt(mod_hann(par.stft.frame_length));%synth.window
@@ -145,8 +145,8 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     twoSecFrames = floor(2 * par.sim.fs * numFrames / length(all_noisy_mic_sigs));
     twoSecNoise_mat = X_mat(:, 1:twoSecFrames, :);
     D = 20;
-    X_XH_sum_noiseOnly = 0;
-    X_XH_sum = 0;
+%     X_XH_sum_noiseOnly = 0;
+%     X_XH_sum = 0;
     beta = 50;
     IVAD_threshold = 25;
     
@@ -154,12 +154,14 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     for iBand = 1:numBands
         for iFrame = 1:twoSecFrames
             if iFrame < twoSecFrames
-               X_XH_sum_noiseOnly = X_XH_sum_noiseOnly + squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :))';  
+               X_XH_sum_noiseOnly(:, :, iBand) = squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :))' / twoSecFrames; 
             end
-        end 
+        end
+        %Cv_hat(:, :, iBand) = X_XH_sum_noiseOnly(:, :, iBand);
+        Cv_hat(:, :, iBand) = squeeze(sum(X_XH_sum_noiseOnly(:, :, iBand), [1 2]));
+        gamma_V(:, :, iBand) = Cv_hat( :, :, iBand) / Cv_hat(ii_ref, ii_ref, iBand);
     end
-    Cv_hat =  X_XH_sum_noiseOnly / twoSecFrames;
-    gamma_V = Cv_hat( :, :) / Cv_hat(ii_ref, ii_ref);
+
     
     %% Processing
     % do beamforming for all freq. bands and all time frames.
@@ -176,30 +178,30 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
             X = X_l(:, max(iFrame - D + 1, 1):iFrame);
             Cx_hat = (X * X') / D;
             Cx_hat_inv = inv(Cx_hat);
-            [d_ml, lambda_s_ml, lambda_v_ml] = ml_known_covariance_structure_fun(Cx_hat, gamma_V, ii_ref);
-            Cv = lambda_v_ml * gamma_V;
+            [d_ml, lambda_s_ml, lambda_v_ml] = ml_known_covariance_structure_fun(Cx_hat, gamma_V(:,:,iBand), ii_ref);
+            Cv = lambda_v_ml * gamma_V(:,:,iBand);
             
             if iFrame > D
                 %DSB
                 W_DSB(:, iBand,iFrame) = d_kl/(d_kl' * d_kl); %DSB Beamformer
-                X_W_DSB(iBand, iFrame) = X_kl' * W_DSB(:, iBand, iFrame); %beamformer output
+                X_W_DSB(iBand, iFrame) = W_DSB(:, iBand, iFrame)' * X_kl; %beamformer output
 
                 %MVDR
-                %W_MVDR(:, iBand, iFrame) = (Cx_hat_inv * d_kl) / (d_kl' * Cx_hat_inv * d_kl); %version one
-                W_MVDR(:, iBand, iFrame) = (inv(Cv) * d_kl)/(d_kl' * inv(Cv) * d_kl); %version 2
-                X_W_MVDR(iBand, iFrame) = X_kl' * W_MVDR(:, iBand, iFrame);
+                W_MVDR(:, iBand, iFrame) = (Cx_hat_inv * d_kl) / (d_kl' * Cx_hat_inv * d_kl); %version one
+                %W_MVDR(:, iBand, iFrame) = (inv(Cv) * d_kl)/(d_kl' * inv(Cv) * d_kl); %version 2
+                X_W_MVDR(iBand, iFrame) = W_MVDR(:, iBand, iFrame)' * X_kl;
 
                 %MVDR with unknown d
                 W_MVDR_unknown(:, iBand, iFrame) = (Cx_hat_inv * d_ml) / (d_ml' * Cx_hat_inv * d_ml);
-                X_W_MVDR_unknown(iBand, iFrame) = X_kl' * W_MVDR_unknown(:, iBand, iFrame);
+                X_W_MVDR_unknown(iBand, iFrame) = W_MVDR_unknown(:, iBand, iFrame)' * X_kl;
 
                 %MWF
-                Cx = lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V;
+                Cx = lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V(:,:,iBand);
                 Cs = Cx - Cv;
                 e = zeros(length(par.config.i_mics_left), 1);
                 e(ii_ref) = 1;
                 W_MWF(:, iBand, iFrame) = inv(Cx)*Cs*e;
-                X_W_MWF(iBand, iFrame) = X_kl' * W_MWF(:, iBand, iFrame);
+                X_W_MWF(iBand, iFrame) = W_MWF(:, iBand, iFrame)' * X_kl;
             else
                  X_W_DSB(iBand, iFrame) = X_kl(ii_ref);
                  X_W_MVDR(iBand, iFrame) = X_kl(ii_ref);
@@ -272,10 +274,34 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     ESTOI(3) = estoi(s_ref, s_MVDR_u, par.sim.fs);
     ESTOI(4) = estoi(s_ref, s_MWF, par.sim.fs);
     
-    SNR(1) = snr(s_ref, s_DSB);
-    SNR(2) = snr(s_ref, s_MVDR);
-    SNR(3) = snr(s_ref, s_MVDR_u);
-    SNR(4) = snr(s_ref, s_MWF);
+    DSB.s = s_ref;
+    DSB.x = s_DSB;
+    
+    MVDR.s = s_ref;
+    MVDR.x = s_MVDR;
+    
+    MVDR_u.s = s_ref;
+    MVDR_u.x = s_MVDR_u;
+    
+    MWF.s = s_ref;
+    MWF.x = s_MWF;
+    
+    seg_SNR(1) = seg_snr(DSB);
+    seg_SNR(2) = seg_snr(MVDR);
+    seg_SNR(3) = seg_snr(MVDR_u);
+    seg_SNR(4) = seg_snr(MWF);
+    
+    figure
+    plot (seg_SNR(1).ssnr);
+    hold on;
+    plot (seg_SNR(2).ssnr);
+    hold on;
+    plot (seg_SNR(3).ssnr);
+    hold on;
+    plot (seg_SNR(4).ssnr);
+    legend({'DSB','MVDR', 'MVDR ml_d', 'MWF'},'Location','northwest');
+    title (sprintf('Segmental SNR for input SNR = %d', par.config.snr_db_ref_left));
+    
 end %endif: should we process left ear HA?
 
 %
