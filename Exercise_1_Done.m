@@ -150,7 +150,7 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     twoSecFrames = floor(2 * par.sim.fs * numFrames / length(all_noisy_mic_sigs));
     twoSecNoise_mat = X_mat(:, 1:twoSecFrames, :);
     D = 20;
-    X_XH_sum_noiseOnly = 0;
+    %X_XH_sum_noiseOnly = 0;
     X_XH_sum = 0;
     beta = 45;
     IVAD_threshold = 25;
@@ -159,12 +159,13 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
     for iBand = 1:numBands
         for iFrame = 1:twoSecFrames
             if iFrame < twoSecFrames
-               X_XH_sum_noiseOnly = X_XH_sum_noiseOnly + squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :))';  
+               X_XH_sum_noiseOnly(:, :, iBand) = squeeze(X_mat(iBand, iFrame, :)) * squeeze(X_mat(iBand, iFrame, :))' / twoSecFrames; 
             end
-        end 
+        end
+        %Cv_hat(:, :, iBand) = X_XH_sum_noiseOnly(:, :, iBand);
+        Cv_hat(:, :, iBand) = squeeze(sum(X_XH_sum_noiseOnly(:, :, iBand), [1 2]));
+        gamma_V(:, :, iBand) = Cv_hat( :, :, iBand) / Cv_hat(ii_ref, ii_ref, iBand);
     end
-    Cv_hat =  X_XH_sum_noiseOnly / twoSecFrames;
-    gamma_V = Cv_hat( :, :) / Cv_hat(ii_ref, ii_ref);
 
     %uncomment to hear the first 2 sec of noise
     %twoSecNoise = (all_noisy_mic_sigs(1:2 * par.sim.fs, ii_ref)); 
@@ -192,8 +193,8 @@ if ~isempty(par.config.i_mics_left)%should we process left ear HA?
             X = X_l(:, max(iFrame - D + 1, 1):iFrame);
             Cx_hat = (X * X') / D;
             
-            [lambda_s_ml, lambda_v_ml] = ml_known_cova_struct_and_d_fun(Cx_hat, gamma_V, d_kl, ii_ref);
-            logLikelihood(iBand, iFrame) = D * log(det(1/M * trace(X * X' * inv(gamma_V)) * gamma_V)) - D * log(det(lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V)); %eq 13
+            [lambda_s_ml, lambda_v_ml] = ml_known_cova_struct_and_d_fun(Cx_hat, gamma_V(:, :, iBand), d_kl, ii_ref);
+            logLikelihood(iBand, iFrame) = D * log(det(1/M * trace(X * X' * inv(gamma_V(:, :, iBand))) * gamma_V(:, :, iBand))) - D * log(det(lambda_s_ml * (d_kl * d_kl') + lambda_v_ml * gamma_V(:, :, iBand))); %eq 13
             logLikelihood_dB(iBand, iFrame) = mag2db(abs(logLikelihood(iBand, iFrame)));
             
             %log likelihood VAD

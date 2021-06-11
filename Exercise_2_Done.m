@@ -23,7 +23,7 @@ par.config.i_mics_right = [3 4];%1 2 3 4];%mics used of right-ear beamformer
 par.config.i_ref_right = 3;%index of right reference mic. (right-front)
 par.config.target_dir_deg = 15;%frontal target (0:5:355)
 par.config.look_dir_deg = 0;% (0:5:355)
-par.config.snr_db_ref_left = -20; %
+par.config.snr_db_ref_left = +5; %
 par.stft.frame_length  = 256;  %corresponds to 12.8ms at fs=20000
 par.stft.awin = sqrt(mod_hann(par.stft.frame_length));%use sqrt hann. window
 par.stft.swin = sqrt(mod_hann(par.stft.frame_length));%synth.window
